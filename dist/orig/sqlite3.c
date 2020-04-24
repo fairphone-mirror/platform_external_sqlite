@@ -1149,7 +1149,7 @@ extern "C" {
 */
 #define SQLITE_VERSION        "3.22.0"
 #define SQLITE_VERSION_NUMBER 3022000
-#define SQLITE_SOURCE_ID      "2018-12-19 01:30:22 c255889bd95bd5430dc7ced3317011ae2abb483d6c9af883af3dc7d6c2c2f234"
+#define SQLITE_SOURCE_ID      "2019-09-03 18:36:11 68b898381ac2942965a3dbd416a45ddf813d6df7ea160f500ae4978e44a3a050"
 
 /*
 ** CAPI3REF: Run-Time Library Version Numbers
@@ -149135,7 +149135,7 @@ SQLITE_PRIVATE int sqlite3Fts3PutVarint(char *p, sqlite_int64 v){
 }
 
 #define GETVARINT_STEP(v, ptr, shift, mask1, mask2, var, ret) \
-  v = (v & mask1) | ( (*ptr++) << shift );                    \
+  v = (v & mask1) | ( (*(ptr++)) << shift );  \
   if( (v & mask2)==0 ){ var = v; return ret; }
 #define GETVARINT_INIT(v, ptr, shift, mask1, mask2, var, ret) \
   v = (*ptr++);                                               \
@@ -149173,20 +149173,21 @@ SQLITE_PRIVATE int sqlite3Fts3GetVarint(const char *pBuf, sqlite_int64 *v){
 ** a non-negative 32-bit integer before it is returned.
 */
 SQLITE_PRIVATE int sqlite3Fts3GetVarint32(const char *p, int *pi){
+  const unsigned char *ptr = (const unsigned char*)p;
   u32 a;
 
 #ifndef fts3GetVarint32
-  GETVARINT_INIT(a, p, 0,  0x00,     0x80, *pi, 1);
+  GETVARINT_INIT(a, ptr, 0,  0x00,     0x80, *pi, 1);
 #else
-  a = (*p++);
+  a = (*ptr++);
   assert( a & 0x80 );
 #endif
 
-  GETVARINT_STEP(a, p, 7,  0x7F,     0x4000, *pi, 2);
-  GETVARINT_STEP(a, p, 14, 0x3FFF,   0x200000, *pi, 3);
-  GETVARINT_STEP(a, p, 21, 0x1FFFFF, 0x10000000, *pi, 4);
+  GETVARINT_STEP(a, ptr, 7,  0x7F,     0x4000, *pi, 2);
+  GETVARINT_STEP(a, ptr, 14, 0x3FFF,   0x200000, *pi, 3);
+  GETVARINT_STEP(a, ptr, 21, 0x1FFFFF, 0x10000000, *pi, 4);
   a = (a & 0x0FFFFFFF );
-  *pi = (int)(a | ((u32)(*p & 0x07) << 28));
+  *pi = (int)(a | ((u32)(*ptr & 0x07) << 28));
   assert( 0==(a & 0x80000000) );
   assert( *pi>=0 );
   return 5;
@@ -160262,7 +160263,7 @@ static int fts3SegReaderNext(
   ** safe (no risk of overread) even if the node data is corrupted. */
   pNext += fts3GetVarint32(pNext, &nPrefix);
   pNext += fts3GetVarint32(pNext, &nSuffix);
-  if( nSuffix<=0
+  if( nSuffix<=0 
    || (&pReader->aNode[pReader->nNode] - pNext)<nSuffix
    || nPrefix>pReader->nTermAlloc
   ){
@@ -160296,7 +160297,7 @@ static int fts3SegReaderNext(
   ** b-tree node. And that the final byte of the doclist is 0x00. If either 
   ** of these statements is untrue, then the data structure is corrupt.
   */
-  if( (&pReader->aNode[pReader->nNode] - pReader->aDoclist)<pReader->nDoclist
+  if( pReader->nDoclist > pReader->nNode-(pReader->aDoclist-pReader->aNode)
    || (pReader->nPopulate==0 && pReader->aDoclist[pReader->nDoclist-1])
   ){
     return FTS_CORRUPT_VTAB;
@@ -170580,6 +170581,7 @@ static int rtreeInit(
 }
 
 
+#if defined(SQLITE_TEST)
 /*
 ** Implementation of a scalar function that decodes r-tree nodes to
 ** human readable strings. This can be used for debugging and analysis.
@@ -170641,6 +170643,7 @@ static void rtreenode(sqlite3_context *ctx, int nArg, sqlite3_value **apArg){
   
   sqlite3_result_text(ctx, zText, -1, sqlite3_free);
 }
+#endif
 
 /* This routine implements an SQL function that returns the "depth" parameter
 ** from the front of a blob that is an r-tree node.  For example:
@@ -171127,9 +171130,11 @@ static void rtreecheck(
 */
 SQLITE_PRIVATE int sqlite3RtreeInit(sqlite3 *db){
   const int utf8 = SQLITE_UTF8;
-  int rc;
+  int rc = SQLITE_OK;
 
+#if defined(SQLITE_TEST)
   rc = sqlite3_create_function(db, "rtreenode", 2, utf8, 0, rtreenode, 0, 0);
+#endif
   if( rc==SQLITE_OK ){
     rc = sqlite3_create_function(db, "rtreedepth", 1, utf8, 0,rtreedepth, 0, 0);
   }
@@ -174528,7 +174533,7 @@ static void rbuCreateImposterTable2(sqlite3rbu *p, RbuObjIter *pIter){
         int iCid = sqlite3_column_int(pXInfo, 1);
         int bDesc = sqlite3_column_int(pXInfo, 3);
         const char *zCollate = (const char*)sqlite3_column_text(pXInfo, 4);
-        zCols = rbuMPrintf(p, "%z%sc%d %s COLLATE %Q", zCols, zComma,
+        zCols = rbuMPrintf(p, "%z%sc%d %s COLLATE %Q", zCols, zComma, 
             iCid, pIter->azTblType[iCid], zCollate
         );
         zPk = rbuMPrintf(p, "%z%sc%d%s", zPk, zComma, iCid, bDesc?" DESC":"");
@@ -174589,7 +174594,7 @@ static void rbuCreateImposterTable(sqlite3rbu *p, RbuObjIter *pIter){
         ** "PRIMARY KEY" to the imposter table column declaration. */
         zPk = "PRIMARY KEY ";
       }
-      zSql = rbuMPrintf(p, "%z%s\"%w\" %s %sCOLLATE %Q%s",
+      zSql = rbuMPrintf(p, "%z%s\"%w\" %s %sCOLLATE %Q%s", 
           zSql, zComma, zCol, pIter->azTblType[iCol], zPk, zColl,
           (pIter->abNotNull[iCol] ? " NOT NULL" : "")
       );
@@ -176781,7 +176786,7 @@ static void rbuMainlistRemove(rbu_file *p){
 }
 
 /*
-** Given that zWal points to a buffer containing a wal file name passed to
+** Given that zWal points to a buffer containing a wal file name passed to 
 ** either the xOpen() or xAccess() VFS method, search the main-db list for
 ** a file-handle opened by the same database connection on the corresponding
 ** database file.
@@ -194166,7 +194171,9 @@ static int fts5HashEntrySort(
   for(iSlot=0; iSlot<pHash->nSlot; iSlot++){
     Fts5HashEntry *pIter;
     for(pIter=pHash->aSlot[iSlot]; pIter; pIter=pIter->pHashNext){
-      if( pTerm==0 || 0==memcmp(fts5EntryKey(pIter), pTerm, nTerm) ){
+      if( pTerm==0 
+       || (pIter->nKey+1>=nTerm && 0==memcmp(fts5EntryKey(pIter), pTerm, nTerm))
+      ){
         Fts5HashEntry *pEntry = pIter;
         pEntry->pScanNext = 0;
         for(i=0; ap[i]; i++){
@@ -203390,7 +203397,7 @@ static void fts5SourceIdFunc(
 ){
   assert( nArg==0 );
   UNUSED_PARAM2(nArg, apUnused);
-  sqlite3_result_text(pCtx, "fts5: 2018-12-19 01:30:22 c255889bd95bd5430dc7ced3317011ae2abb483d6c9af883af3dc7d6c2c2f234", -1, SQLITE_TRANSIENT);
+  sqlite3_result_text(pCtx, "fts5: 2019-09-03 18:36:11 68b898381ac2942965a3dbd416a45ddf813d6df7ea160f500ae4978e44a3a050", -1, SQLITE_TRANSIENT);
 }
 
 static int fts5Init(sqlite3 *db){
@@ -207658,9 +207665,9 @@ SQLITE_API int sqlite3_stmt_init(
 #endif /* !defined(SQLITE_CORE) || defined(SQLITE_ENABLE_STMTVTAB) */
 
 /************** End of stmt.c ************************************************/
-#if __LINE__!=207661
+#if __LINE__!=207668
 #undef SQLITE_SOURCE_ID
-#define SQLITE_SOURCE_ID      "2018-12-19 01:30:22 c255889bd95bd5430dc7ced3317011ae2abb483d6c9af883af3dc7d6c2c2alt2"
+#define SQLITE_SOURCE_ID      "2019-09-03 18:36:11 68b898381ac2942965a3dbd416a45ddf813d6df7ea160f500ae4978e44a3alt2"
 #endif
 /* Return the source-id for this library */
 SQLITE_API const char *sqlite3_sourceid(void){ return SQLITE_SOURCE_ID; }
