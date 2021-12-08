@@ -1164,7 +1164,7 @@ extern "C" {
 */
 #define SQLITE_VERSION        "3.28.0"
 #define SQLITE_VERSION_NUMBER 3028000
-#define SQLITE_SOURCE_ID      "2020-05-06 18:46:38 b2325a6e1cfa19e9fd533c1f7dacfc8e5aa4f2e111fa066a5c7d3040418fc8ad"
+#define SQLITE_SOURCE_ID      "2021-07-13 15:30:48 d2e672203704aa18fdc652e9567eb29b71dae32e871f514308478a7a96025f29"
 
 /*
 ** CAPI3REF: Run-Time Library Version Numbers
@@ -17812,6 +17812,7 @@ struct Select {
 #define SF_Converted      0x10000  /* By convertCompoundSelectToSubquery() */
 #define SF_IncludeHidden  0x20000  /* Include hidden columns in output */
 #define SF_ComplexResult  0x40000  /* Result contains subquery or function */
+#define SF_NoopOrderBy   0x0400000 /* ORDER BY is ignored for this query */
 
 /*
 ** The results of a SELECT can be distributed in several ways, as defined
@@ -126326,8 +126327,6 @@ static const char *columnTypeImpl(
 
   assert( pExpr!=0 );
   assert( pNC->pSrcList!=0 );
-  assert( pExpr->op!=TK_AGG_COLUMN );  /* This routine runes before aggregates
-                                       ** are processed */
   switch( pExpr->op ){
     case TK_COLUMN: {
       /* The expression is a column. Locate the table the column is being
@@ -126649,7 +126648,6 @@ SQLITE_PRIVATE int sqlite3ColumnsFromExprList(
         pColExpr = pColExpr->pRight;
         assert( pColExpr!=0 );
       }
-      assert( pColExpr->op!=TK_AGG_COLUMN );
       if( pColExpr->op==TK_COLUMN ){
         /* For columns use the column name name */
         int iCol = pColExpr->iColumn;
@@ -127375,9 +127373,7 @@ static int multiSelect(
                           selectOpName(p->op)));
         rc = sqlite3Select(pParse, p, &uniondest);
         testcase( rc!=SQLITE_OK );
-        /* Query flattening in sqlite3Select() might refill p->pOrderBy.
-        ** Be sure to delete p->pOrderBy, therefore, to avoid a memory leak. */
-        sqlite3ExprListDelete(db, p->pOrderBy);
+        assert( p->pOrderBy==0 );
         pDelete = p->pPrior;
         p->pPrior = pPrior;
         p->pOrderBy = 0;
@@ -128693,7 +128689,7 @@ static int flattenSubquery(
     ** We look at every expression in the outer query and every place we see
     ** "a" we substitute "x*3" and every place we see "b" we substitute "y+10".
     */
-    if( pSub->pOrderBy ){
+    if( pSub->pOrderBy && (pParent->selFlags & SF_NoopOrderBy)==0 ){
       /* At this point, any non-zero iOrderByCol values indicate that the
       ** ORDER BY column expression is identical to the iOrderByCol'th
       ** expression returned by SELECT statement pSub. Since these values
@@ -130327,6 +130323,7 @@ SQLITE_PRIVATE int sqlite3Select(
     sqlite3ExprListDelete(db, p->pOrderBy);
     p->pOrderBy = 0;
     p->selFlags &= ~SF_Distinct;
+    p->selFlags |= SF_NoopOrderBy;
   }
   sqlite3SelectPrep(pParse, p, 0);
   if( pParse->nErr || db->mallocFailed ){
@@ -218337,7 +218334,7 @@ static void fts5SourceIdFunc(
 ){
   assert( nArg==0 );
   UNUSED_PARAM2(nArg, apUnused);
-  sqlite3_result_text(pCtx, "fts5: 2020-05-06 18:46:38 b2325a6e1cfa19e9fd533c1f7dacfc8e5aa4f2e111fa066a5c7d3040418fc8ad", -1, SQLITE_TRANSIENT);
+  sqlite3_result_text(pCtx, "fts5: 2021-07-13 15:30:48 d2e672203704aa18fdc652e9567eb29b71dae32e871f514308478a7a96025f29", -1, SQLITE_TRANSIENT);
 }
 
 /*
@@ -223101,9 +223098,9 @@ SQLITE_API int sqlite3_stmt_init(
 #endif /* !defined(SQLITE_CORE) || defined(SQLITE_ENABLE_STMTVTAB) */
 
 /************** End of stmt.c ************************************************/
-#if __LINE__!=223104
+#if __LINE__!=223101
 #undef SQLITE_SOURCE_ID
-#define SQLITE_SOURCE_ID      "2020-05-06 18:46:38 b2325a6e1cfa19e9fd533c1f7dacfc8e5aa4f2e111fa066a5c7d3040418falt2"
+#define SQLITE_SOURCE_ID      "2021-07-13 15:30:48 d2e672203704aa18fdc652e9567eb29b71dae32e871f514308478a7a9602alt2"
 #endif
 /* Return the source-id for this library */
 SQLITE_API const char *sqlite3_sourceid(void){ return SQLITE_SOURCE_ID; }
